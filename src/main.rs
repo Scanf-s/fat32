@@ -1,8 +1,9 @@
-mod fat32;
+mod bootloader;
+mod ls;
 
 use std::{env, fs::File, io, process::ExitCode};
 
-use fat32::BootSector;
+use bootloader::BootSector;
 
 fn main() -> ExitCode {
     match run() {
@@ -19,13 +20,21 @@ fn run() -> io::Result<()> {
     let (Some(command), Some(path), None) = (args.next(), args.next(), args.next()) else {
         return Err(usage_error());
     };
-    if command != "info" {
+    let Some(command @ ("info" | "ls")) = command.to_str() else {
         return Err(usage_error());
-    }
+    };
 
     let mut image = File::open(path)?;
     let boot = BootSector::read(&mut image)?;
 
+    if command == "ls" {
+        return ls::run(&boot, &mut image);
+    }
+    print_info(&boot);
+    Ok(())
+}
+
+fn print_info(boot: &BootSector) {
     println!("Bytes per sector: {}", boot.bytes_per_sector);
     println!("Sectors per cluster: {}", boot.sectors_per_cluster);
     println!("Reserved sectors: {}", boot.reserved_sectors);
@@ -38,12 +47,11 @@ fn run() -> io::Result<()> {
         "Root directory byte offset: {}",
         boot.root_directory_offset()
     );
-    Ok(())
 }
 
 fn usage_error() -> io::Error {
     io::Error::new(
         io::ErrorKind::InvalidInput,
-        "usage: fat32-explorer info <image>",
+        "usage: fat32-explorer <info|ls> <image>",
     )
 }

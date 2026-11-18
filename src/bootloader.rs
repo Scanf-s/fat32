@@ -11,6 +11,7 @@ pub struct BootSector {
     pub sectors_per_fat: u32,
     pub total_sectors: u32,
     pub root_cluster: u32,
+    active_fat_index: u8,
 }
 
 impl BootSector {
@@ -39,6 +40,13 @@ impl BootSector {
             return Err(invalid_data("unsupported FAT32 version"));
         }
 
+        let fat_flags = u16_at(40);
+        // Mirrored FATs let us use the first copy. Otherwise the BPB selects the active copy.
+        let active_fat_index = if fat_flags & 0x0080 == 0 {
+            0
+        } else {
+            (fat_flags & 0x000F) as u8
+        };
         let boot = Self {
             bytes_per_sector: u16_at(11),
             sectors_per_cluster: bytes[13],
@@ -47,6 +55,7 @@ impl BootSector {
             sectors_per_fat: u32_at(36),
             total_sectors: u32_at(32),
             root_cluster: u32_at(44),
+            active_fat_index,
         };
         boot.validate(image.metadata()?.len())?;
         Ok(boot)
@@ -58,9 +67,29 @@ impl BootSector {
     }
 
     pub fn root_directory_offset(&self) -> u64 {
-        let sectors_from_data_start =
-            u64::from(self.root_cluster - 2) * u64::from(self.sectors_per_cluster);
+        self.cluster_offset(self.root_cluster)
+    }
+
+    pub(super) fn active_fat_offset(&self) -> io::Result<u64> {
+        if self.active_fat_index >= self.fat_count {
+            return Err(invalid_data("active FAT index is outside the FAT region"));
+        }
+
+        let fat_sector = u64::from(self.reserved_sectors)
+            + u64::from(self.active_fat_index) * u64::from(self.sectors_per_fat);
+        Ok(fat_sector * u64::from(self.bytes_per_sector))
+    }
+
+    pub(super) fn cluster_offset(&self, cluster: u32) -> u64 {
+        let sectors_from_data_start = u64::from(cluster - 2) * u64::from(self.sectors_per_cluster);
         (self.first_data_sector() + sectors_from_data_start) * u64::from(self.bytes_per_sector)
+    }
+
+    pub(super) fn cluster_count(&self) -> io::Result<u64> {
+        let data_sectors = u64::from(self.total_sectors)
+            .checked_sub(self.first_data_sector())
+            .ok_or_else(|| invalid_data("data region starts outside the volume"))?;
+        Ok(data_sectors / u64::from(self.sectors_per_cluster))
     }
 
     fn validate(&self, image_size: u64) -> io::Result<()> {
@@ -73,11 +102,7 @@ impl BootSector {
             return Err(invalid_data("invalid FAT32 volume geometry"));
         }
 
-        let total_sectors = u64::from(self.total_sectors);
-        let data_sectors = total_sectors
-            .checked_sub(self.first_data_sector())
-            .ok_or_else(|| invalid_data("data region starts outside the volume"))?;
-        let cluster_count = data_sectors / u64::from(self.sectors_per_cluster);
+        let cluster_count = self.cluster_count()?;
         let last_cluster = cluster_count + 1;
         if cluster_count < 65_525 || last_cluster >= 0x0FFF_FFF7 {
             return Err(invalid_data("cluster count is outside the FAT32 range"));
@@ -93,7 +118,7 @@ impl BootSector {
         if fat_size / 4 <= last_cluster {
             return Err(invalid_data("FAT is too small for the data region"));
         }
-        if total_sectors * sector_size > image_size {
+        if u64::from(self.total_sectors) * sector_size > image_size {
             return Err(invalid_data(
                 "image is shorter than the declared volume size",
             ));
@@ -102,6 +127,6 @@ impl BootSector {
     }
 }
 
-fn invalid_data(message: &str) -> io::Error {
+pub(super) fn invalid_data(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
