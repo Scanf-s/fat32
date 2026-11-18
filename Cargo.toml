@@ -1,0 +1,4 @@
+[package]
+name = "fat32-explorer"
+version = "0.1.0"
+edition = "2024"
