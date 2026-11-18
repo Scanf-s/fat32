@@ -1,4 +1,6 @@
 mod bootloader;
+mod cat;
+mod fat;
 mod ls;
 
 use std::{env, fs::File, io, process::ExitCode};
@@ -16,28 +18,42 @@ fn main() -> ExitCode {
 }
 
 fn run() -> io::Result<()> {
+    enum Command<'a> {
+        Info,
+        List(&'a str),
+        Cat(&'a str),
+    }
+
     let mut args = env::args_os().skip(1);
-    let (Some(command), Some(path)) = (args.next(), args.next()) else {
+    let (Some(command), Some(image_path)) = (args.next(), args.next()) else {
         return Err(usage_error());
     };
-    let directory = args.next();
-    let list_path = match (command.to_str(), directory.as_deref(), args.next()) {
-        (Some("info"), None, None) => None,
-        (Some("ls"), None, None) => Some("/"),
-        (Some("ls"), Some(directory), None) => Some(directory.to_str().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "directory path must be UTF-8")
+    let target = args.next();
+    let command = match (command.to_str(), target.as_deref(), args.next()) {
+        (Some("info"), None, None) => Command::Info,
+        (Some("ls"), None, None) => Command::List("/"),
+        (Some("ls"), Some(directory), None) => {
+            Command::List(directory.to_str().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "directory path must be UTF-8")
+            })?)
+        }
+        (Some("cat"), Some(file), None) => Command::Cat(file.to_str().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "file path must be UTF-8")
         })?),
         _ => return Err(usage_error()),
     };
 
-    let mut image = File::open(path)?;
+    let mut image = File::open(image_path)?;
     let boot = BootSector::read(&mut image)?;
 
-    if let Some(path) = list_path {
-        return ls::run(&boot, &mut image, path);
+    match command {
+        Command::Info => {
+            print_info(&boot);
+            Ok(())
+        }
+        Command::List(path) => ls::run(&boot, &mut image, path),
+        Command::Cat(path) => cat::run(&boot, &mut image, path),
     }
-    print_info(&boot);
-    Ok(())
 }
 
 fn print_info(boot: &BootSector) {
@@ -58,6 +74,6 @@ fn print_info(boot: &BootSector) {
 fn usage_error() -> io::Error {
     io::Error::new(
         io::ErrorKind::InvalidInput,
-        "usage: fat32-explorer info <image>\n       fat32-explorer ls <image> [directory]",
+        "usage: fat32-explorer info <image>\n       fat32-explorer ls <image> [directory]\n       fat32-explorer cat <image> <file>",
     )
 }

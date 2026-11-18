@@ -18,3 +18,9 @@ Omit the directory path to list the root, or pass a path such as `/DOCS`.
 cargo run -- ls fat32.img
 cargo run -- ls fat32.img /DOCS
 ```
+
+Print a file's contents using its short FAT path.
+
+```sh
+cargo run -- cat fat32.img /DOCS/NOTES.TXT
+```

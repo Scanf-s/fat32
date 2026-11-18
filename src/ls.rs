@@ -5,11 +5,13 @@ use std::{
 };
 
 use crate::bootloader::{BootSector, invalid_data};
+use crate::fat::{FIRST_END_OF_CHAIN_MARKER, read_fat_entry};
 
-struct DirectoryEntry {
-    name: String,
-    is_directory: bool,
-    first_cluster: u32,
+pub(super) struct DirectoryEntry {
+    pub(super) name: String,
+    pub(super) is_directory: bool,
+    pub(super) first_cluster: u32,
+    pub(super) file_size: u32,
 }
 
 pub(super) fn run(boot: &BootSector, image: &mut File, path: &str) -> io::Result<()> {
@@ -23,7 +25,7 @@ pub(super) fn run(boot: &BootSector, image: &mut File, path: &str) -> io::Result
     Ok(())
 }
 
-fn open_directory(
+pub(super) fn open_directory(
     boot: &BootSector,
     image: &mut File,
     path: &str,
@@ -111,7 +113,7 @@ fn read_directory(
         }
 
         let next = read_fat_entry(image, fat_offset, cluster)?;
-        if next >= 0x0FFF_FFF8 {
+        if next >= FIRST_END_OF_CHAIN_MARKER {
             return Ok(entries);
         }
         if !data_clusters.contains(&u64::from(next)) {
@@ -121,14 +123,6 @@ fn read_directory(
         }
         cluster = next;
     }
-}
-
-fn read_fat_entry(image: &mut File, fat_offset: u64, cluster: u32) -> io::Result<u32> {
-    let offset = fat_offset + u64::from(cluster) * 4;
-    let mut bytes = [0; 4];
-    image.seek(SeekFrom::Start(offset))?;
-    image.read_exact(&mut bytes)?;
-    Ok(u32::from_le_bytes(bytes) & 0x0FFF_FFFF)
 }
 
 impl DirectoryEntry {
@@ -149,10 +143,12 @@ impl DirectoryEntry {
 
         let cluster_high = u32::from(u16::from_le_bytes([entry[20], entry[21]]));
         let cluster_low = u32::from(u16::from_le_bytes([entry[26], entry[27]]));
+        let file_size = u32::from_le_bytes([entry[28], entry[29], entry[30], entry[31]]);
         Self {
             name,
             is_directory: entry[11] & 0x10 != 0,
             first_cluster: (cluster_high << 16) | cluster_low,
+            file_size,
         }
     }
 
