@@ -70,7 +70,6 @@ fn read_fat_entry(image: &mut File, fat_offset: u64, cluster: u32) -> io::Result
     let mut bytes = [0; 4];
     image.seek(SeekFrom::Start(offset))?;
     image.read_exact(&mut bytes)?;
-    // FAT32 reserves the high four bits of each FAT entry.
     Ok(u32::from_le_bytes(bytes) & 0x0FFF_FFFF)
 }
 
@@ -78,14 +77,13 @@ impl DirectoryEntry {
     fn from_short_entry(entry: &[u8]) -> Self {
         let mut stem = [0; 8];
         stem.copy_from_slice(&entry[..8]);
-        // FAT uses 0x05 for an initial 0xE5 byte to distinguish it from a deleted entry.
         if stem[0] == 0x05 {
             stem[0] = 0xE5;
         }
 
         let case_flags = entry[12];
-        let mut name = display_short_name_part(&stem, case_flags & 0x08 != 0);
-        let extension = display_short_name_part(&entry[8..11], case_flags & 0x10 != 0);
+        let mut name = Self::display_short_name_part(&stem, case_flags & 0x08 != 0);
+        let extension = Self::display_short_name_part(&entry[8..11], case_flags & 0x10 != 0);
         if !extension.is_empty() {
             name.push('.');
             name.push_str(&extension);
@@ -96,19 +94,19 @@ impl DirectoryEntry {
             is_directory: entry[11] & 0x10 != 0,
         }
     }
-}
 
-fn display_short_name_part(bytes: &[u8], lowercase: bool) -> String {
-    let mut name = String::new();
-    for &byte in bytes.trim_ascii_end() {
-        if byte.is_ascii_graphic() || byte == b' ' {
-            name.push(char::from(byte));
-        } else {
-            name.extend(std::ascii::escape_default(byte).map(char::from));
+    fn display_short_name_part(bytes: &[u8], lowercase: bool) -> String {
+        let mut name = String::new();
+        for &byte in bytes.trim_ascii_end() {
+            if byte.is_ascii_graphic() || byte == b' ' {
+                name.push(char::from(byte));
+            } else {
+                name.extend(std::ascii::escape_default(byte).map(char::from));
+            }
         }
+        if lowercase {
+            name.make_ascii_lowercase();
+        }
+        name
     }
-    if lowercase {
-        name.make_ascii_lowercase();
-    }
-    name
 }
