@@ -11,8 +11,10 @@ cargo run -- info fat32.img
 In the sample image, the root directory starts at cluster `2`, at byte offset
 `661504`.
 
-List the root directory using its short FAT names. A trailing `/` marks a directory.
+List directories using their short FAT names. A trailing `/` in the output marks a directory.
+Omit the directory path to list the root, or pass a path such as `/DOCS`.
 
 ```sh
 cargo run -- ls fat32.img
+cargo run -- ls fat32.img /DOCS
 ```
